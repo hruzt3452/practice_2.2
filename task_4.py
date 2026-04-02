@@ -1,179 +1,143 @@
-"""
-Напишите программу, которая мониторит курс валют по данному
-URL(https://www.cbr-xml-daily.ru/daily_json.js).
-Предусмотрите следующий функционал приложения:
-1) Приложение должно давать возможность просматривать текущий
-курс всех валют.
-2) Приложение должно давать возможность посмотреть отдельно
-валюту по ее коду.
-3) Приложение должно давать возможность создавать группы валют,
-куда можно будет добавить валюты для отслеживания.
-4) Приложение должно давать возможность посмотреть все
-созданные пользователем группы валют.
-5) Приложение должно давать возможность изменять список
-отслеживаемых валют(удалить выбранную валюту, добавить валюту по коду).
-6) Сохранять группы с валютами в файле save.json
-7) Считывать созданные группы с валютой из файла save.json
-"""
-
 import requests
-import json
-import os
 
-URL = "https://www.cbr-xml-daily.ru/daily_json.js"
-FILE_NAME = "save.json"
+BASE_URL = "https://api.github.com"
+HEADERS = {
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28"
+}
+TIMEOUT = 10
 
 
-def get_currencies():
+def _safe_request(url: str, params: dict = None) -> dict | None:
     try:
-        response = requests.get(URL)
-        data = response.json()
-        return data["Valute"]
-    except:
-        print("Ошибка загрузки данных")
-        return None
-
-
-def show_all(currencies):
-    if not currencies:
-        return
-
-    print("\nКУРСЫ ВАЛЮТ:")
-    print("-" * 50)
-    for code in currencies:
-        name = currencies[code]["Name"]
-        value = currencies[code]["Value"]
-        nominal = currencies[code]["Nominal"]
-        print(f"{code}: {nominal} {name} = {value} руб.")
-    print("-" * 50)
-
-
-def find_currency(currencies, code):
-    code = code.upper()
-    if code in currencies:
-        c = currencies[code]
-        print(f"\n{code}: {c['Nominal']} {c['Name']} = {c['Value']} руб.")
-    else:
-        print("Валюта не найдена")
-
-
-def load_groups():
-    if os.path.exists(FILE_NAME):
-        with open(FILE_NAME, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-
-def save_groups(groups):
-    with open(FILE_NAME, "w", encoding="utf-8") as f:
-        json.dump(groups, f, ensure_ascii=False, indent=2)
-
-
-def create_group(groups):
-    name = input("Введите название группы: ")
-    if name not in groups:
-        groups[name] = []
-        print(f"Группа '{name}' создана")
-    else:
-        print("Такая группа уже есть")
-
-
-def show_groups(groups, currencies):
-    if not groups:
-        print("Нет созданных групп")
-        return
-
-    print("\nГРУППЫ ВАЛЮТ:")
-    for group in groups:
-        print(f"\n{group}:")
-        if not groups[group]:
-            print("  (пусто)")
-        for code in groups[group]:
-            if code in currencies:
-                value = currencies[code]["Value"]
-                print(f"  {code}: {value} руб.")
-            else:
-                print(f"  {code}: (нет данных)")
-
-
-def add_to_group(groups, currencies):
-    show_groups(groups, currencies)
-
-    group = input("Введите название группы: ")
-    if group not in groups:
-        print("Группа не найдена")
-        return
-
-    code = input("Введите код валюты: ").upper()
-    if code in currencies:
-        if code not in groups[group]:
-            groups[group].append(code)
-            print(f"{code} добавлен в группу {group}")
+        response = requests.get(url, headers=HEADERS, params=params, timeout=TIMEOUT)
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 404:
+            print("Не найдено")
+        elif response.status_code == 403:
+            print("Превышен лимит запросов (попробуйте позже или добавьте токен)")
         else:
-            print("Такая валюта уже есть в группе")
-    else:
-        print("Валюта не найдена")
+            print(f"Ошибка API: {response.status_code}")
+    except requests.Timeout:
+        print("Таймаут соединения")
+    except requests.RequestException as e:
+        print(f"Ошибка сети: {e}")
+    return None
 
 
-def remove_from_group(groups):
-    show_groups(groups, {})
-
-    group = input("Введите название группы: ")
-    if group not in groups:
-        print("Группа не найдена")
+def get_user():
+    username = input("Введите имя пользователя GitHub: ").strip()
+    if not username:
+        return
+    
+    data = _safe_request(f"{BASE_URL}/users/{username}")
+    if not data:
         return
 
-    code = input("Введите код валюты: ").upper()
-    if code in groups[group]:
-        groups[group].remove(code)
-        print(f"{code} удален из группы {group}")
-    else:
-        print("Валюты нет в группе")
+    print("\n" + "=" * 40)
+    print("        ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ")
+    print("=" * 40)
+    print(f"Имя: {data.get('name') or data['login']}")
+    print(f"Профиль: {data['html_url']}")
+    print(f"Репозиториев: {data['public_repos']}")
+    print(f"Публичных гистов: {data['public_gists']}")
+    print(f"Подписки (following): {data['following']}")
+    print(f"Подписчики (followers): {data['followers']}")
+    if data.get('bio'):
+        print(f"Био: {data['bio']}")
+    if data.get('location'):
+        print(f"Локация: {data['location']}")
+
+
+def get_repos():
+    username = input("Введите имя пользователя GitHub: ").strip()
+    if not username:
+        return
+    
+    data = _safe_request(f"{BASE_URL}/users/{username}/repos", {"per_page": 50, "sort": "updated"})
+    if not data:
+        return
+
+    if not data:
+        print("У пользователя нет публичных репозиториев")
+        return
+
+    print(f"\nРЕПОЗИТОРИИ {username} ({len(data)} найдено, показываем первые 10)")
+    print("=" * 50)
+
+    for repo in data[:10]:
+        print(f"\n{repo['name']}")
+        print(f"Ссылка: {repo['html_url']}")
+        print(f"Язык: {repo['language'] or 'Не указан'}")
+        print(f"Видимость: {'Приватный' if repo['private'] else 'Публичный'}")
+        print(f"Ветка по умолчанию: {repo['default_branch']}")
+        print(f"Звёзд: {repo['stargazers_count']} | Форков: {repo['forks_count']}")
+        if repo.get('description'):
+            desc = repo['description']
+            print(f"Описание: {desc[:60]}{'...' if len(desc) > 60 else ''}")
+        print("-" * 40)
+
+
+def search_repos():
+    query = input("Введите название для поиска: ").strip()
+    if not query:
+        return
+
+    data = _safe_request(f"{BASE_URL}/search/repositories", {
+        "q": f"in:name {query}",
+        "sort": "stars",
+        "order": "desc",
+        "per_page": 10
+    })
+    if not data:
+        return
+
+    items = data.get('items', [])
+    if not items:
+        print("Ничего не найдено")
+        return
+
+    print(f"\nРЕЗУЛЬТАТЫ ПОИСКА '{query}' (найдено: {data.get('total_count', 0)})")
+    print("=" * 50)
+
+    for repo in items:
+        print(f"\n{repo['full_name']}")
+        print(f"Автор: {repo['owner']['login']}")
+        print(f"Ссылка: {repo['html_url']}")
+        print(f"Язык: {repo['language'] or 'Не указан'} | Видимость: {'Приватный' if repo['private'] else 'Публичный'}")
+        print(f"Звёзд: {repo['stargazers_count']} | Форков: {repo['forks_count']}")
+        if repo.get('description'):
+            desc = repo['description']
+            print(f"Описание: {desc[:60]}{'...' if len(desc) > 60 else ''}")
+        print("-" * 40)
 
 
 def main():
-    currencies = get_currencies()
-    if not currencies:
-        return
-
-    groups = load_groups()
-
     while True:
-        print("\n" + "=" * 30)
-        print(" " * 7, "МОНИТОР ВАЛЮТ")
-        print("=" * 30)
-        print("1. Показать все валюты")
-        print("2. Найти валюту по коду")
-        print("3. Создать группу")
-        print("4. Показать все группы")
-        print("5. Добавить валюту в группу")
-        print("6. Удалить валюту из группы")
-        print("7. Выход")
-        print("-" * 30)
+        print("\n" + "=" * 35)
+        print("        GITHUB API CLIENT")
+        print("=" * 35)
+        print("1. Профиль пользователя")
+        print("2. Репозитории пользователя") 
+        print("3. Поиск репозиториев")
+        print("4. Выход")
+        print("-" * 35)
 
-        choice = input("Выберите действие: ")
+        choice = input("Выберите действие (1-4): ").strip()
 
         if choice == "1":
-            show_all(currencies)
+            get_user()
         elif choice == "2":
-            code = input("Введите код валюты (например USD): ")
-            find_currency(currencies, code)
+            get_repos()
         elif choice == "3":
-            create_group(groups)
-            save_groups(groups)
+            search_repos()
         elif choice == "4":
-            show_groups(groups, currencies)
-        elif choice == "5":
-            add_to_group(groups, currencies)
-            save_groups(groups)
-        elif choice == "6":
-            remove_from_group(groups)
-            save_groups(groups)
-        elif choice == "7":
-            print("До свидания!")
+            print("Покаа!")
             break
         else:
-            print("Неверный выбор")
+            print("Неверный выбор, попробуйте снова")
+            continue
 
         input("\nНажмите Enter для продолжения...")
 
